@@ -103,7 +103,7 @@ async def resemblance_results(movie_id: int):
 
     # step 3: query the db using the order of top_n_combined
     query = '''
-        SELECT id, title, release_date, poster_path FROM movies
+        SELECT id, title, release_date, poster_path, imdb_id FROM movies
         WHERE id IN :movie_ids
     '''
     values = {'movie_ids': tuple(top_n_combined)}
