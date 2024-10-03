@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-import pandas as pd
 import numpy as np
 from sentence_transformers import SentenceTransformer, util
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -19,7 +18,6 @@ encodings = {} # genre, overview, keyword, popularity, review
 model_weights = {} # genre, overview, keyword, popularity, review
 
 database_url = os.getenv('DATABASE_URL')
-print(database_url)
 database = databases.Database(database_url)
 
 @asynccontextmanager
