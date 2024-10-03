@@ -15,7 +15,13 @@ pickle_dir = "pickles"
 
 models = {} # genre, overview, keyword
 encodings = {} # genre, overview, keyword, popularity, review
-model_weights = {} # genre, overview, keyword, popularity, review
+model_weights = {
+    'overview': 0.6,
+    'popularity': 0.05,
+    'review': 0.05,
+    'keyword': 0.1,
+    'genre': 0.2
+}
 
 database_url = os.getenv('DATABASE_URL')
 database = databases.Database(database_url)
@@ -29,10 +35,6 @@ async def lifespan(app: FastAPI):
     with open(os.path.join(pickle_dir, 'my_encodings.pickle'), 'rb') as r:
         for key, value in pickle.load(r).items():
             encodings[key] = value
-
-    with open(os.path.join(pickle_dir, 'my_weights.pickle'), 'rb') as r:
-        for key, value in pickle.load(r).items():
-            model_weights[key] = value
 
     await database.connect()
 
