@@ -8,6 +8,8 @@ from sklearn import preprocessing as pre
 import pickle
 import os
 import databases
+from scipy.sparse import csr_matrix
+import uvicorn
 
 top_n = 10
 
@@ -15,13 +17,7 @@ pickle_dir = "pickles"
 
 models = {} # genre, overview, keyword
 encodings = {} # genre, overview, keyword, popularity, review
-model_weights = {
-    'overview': 0.6,
-    'popularity': 0.05,
-    'review': 0.05,
-    'keyword': 0.1,
-    'genre': 0.2
-}
+weights = {}
 
 database_url = os.getenv('DATABASE_URL')
 database = databases.Database(database_url)
@@ -36,6 +32,10 @@ async def lifespan(app: FastAPI):
         for key, value in pickle.load(r).items():
             encodings[key] = value
 
+    with open(os.path.join(pickle_dir, 'my_weights.pickle'), 'rb') as r:
+        for key, value in pickle.load(r).items():
+            weights[key] = value
+
     await database.connect()
 
     yield
@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
     await database.disconnect()
     models.clear()
     encodings.clear()
-    model_weights.clear()
+    weights.clear()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -62,7 +62,7 @@ We need two endpoints for now:
 @app.get('/api/search-by-title')
 async def search_by_title(title: str):
     query = '''
-        SELECT id, title, release_date, poster_path FROM movies
+        SELECT id, title, release_date, poster FROM movies
         WHERE title LIKE :title
         LIMIT 10
     '''
@@ -74,38 +74,49 @@ async def search_by_title(title: str):
 async def resemblance_results(movie_id: int):
     # step 1: get the full movie data we are comparing against
     query = '''
-        SELECT id, overview, genres, keywords FROM movies
+        SELECT id, overview, genres, keywords, cast, director FROM movies
         WHERE id = :movie_id
     '''
     values = {'movie_id': movie_id}
     movie = await database.fetch_one(query=query, values=values)
-    genres = [movie['genres'].split(', ')]
-    keywords = movie['keywords'].replace(', ', ' ')
+
+    genres = movie['genres']
+    keywords = movie['keywords']
     overview = movie['overview']
+    actors = movie['cast']
+    directors = movie['director']
 
     overview_embedding = models['overview'].encode(overview, convert_to_tensor=True)
-    keyword_encoding = models['keyword'].transform([keywords]).tocsc().astype(float)
-    genre_matrix = models['genre'].transform(genres)
+    keyword_encoding = models['keyword'].transform([keywords.replace(', ', ' ')]).tocsc().astype(float)
+    genre_matrix = csr_matrix(models['genre'].transform([genres.split(', ')]))
+    actor_matrix = csr_matrix(models['actors'].transform([actors.split(', ')]))
+    director_matrix = csr_matrix(models['director'].transform([directors.split(', ')]))
 
     overview_scores = util.pytorch_cos_sim(overview_embedding, encodings['overview'])
-    keyword_scores = cosine_similarity(keyword_encoding, encodings['keyword'])
+    keyword_scores = cosine_similarity(keyword_encoding, encodings['keyword']).flatten()
     genre_scores = cosine_similarity(genre_matrix, encodings['genre'])
+    actor_scores = cosine_similarity(actor_matrix, encodings['actors'])
+    director_scores = cosine_similarity(director_matrix, encodings['director'])
 
     combined_score = np.array((
-        model_weights['overview'] * overview_scores +
-        model_weights['keyword'] * keyword_scores + 
-        model_weights['popularity'] * encodings['popularity'] +
-        model_weights['review'] * encodings['review'] + 
-        model_weights['genre'] * genre_scores
+        weights['overview'] * overview_scores.cpu() +
+        weights['keyword'] * keyword_scores + 
+        weights['popularity'] * encodings['popularity'] +
+        weights['review'] * encodings['review'] + 
+        weights['genre'] * genre_scores +
+        weights['actors'] * actor_scores +
+        weights['directors'] * director_scores
     )[0])
 
     top_n_combined = np.array(np.argsort(-combined_score)[:top_n])
 
     # step 3: query the db using the order of top_n_combined
-    query = '''
-        SELECT id, title, release_date, poster_path, imdb_id FROM movies
+    query = f'''
+        SELECT id, title, release_date, poster, imdb_id FROM movies
         WHERE id IN :movie_ids
-    '''
+        ORDER BY FIELD(id, {','.join(map(str, top_n_combined))})
+    ''' 
+    # gonne be honest here, no idea why f strings work here and not just putting it into values
     values = {'movie_ids': tuple(top_n_combined)}
     movies = await database.fetch_all(query=query, values=values)
 
