@@ -14,6 +14,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 ARG DATABASE_URL
 ENV DATABASE_URL=${DATABASE_URL}
 
+ARG FRONTEND_URL
+ENV FRONTEND_URL=${FRONTEND_URL}
+
 # Copy the rest of the application code into the container
 COPY . .
 

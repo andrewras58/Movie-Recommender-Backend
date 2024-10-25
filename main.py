@@ -10,6 +10,7 @@ import os
 import databases
 from scipy.sparse import csr_matrix
 import uvicorn
+from fastapi.middleware.cors import CORSMiddleware
 
 top_n = 10
 
@@ -46,6 +47,19 @@ async def lifespan(app: FastAPI):
     weights.clear()
 
 app = FastAPI(lifespan=lifespan)
+
+origins = [
+    os.getenv('FRONTEND_URL')
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 '''
 We need two endpoints for now:
