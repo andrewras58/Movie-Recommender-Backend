@@ -78,7 +78,8 @@ async def search_by_title(title: str):
     query = '''
         SELECT id, title, release_date, poster FROM movies
         WHERE title LIKE :title
-        LIMIT 10
+        ORDER BY num_ratings DESC
+        LIMIT 15
     '''
     values = {'title': f'%{title}%'}
     results = await database.fetch_all(query=query, values=values)
@@ -125,12 +126,14 @@ async def resemblance_results(movie_id: int):
     top_n_combined = np.array(np.argsort(-combined_score)[:top_n])
 
     # step 3: query the db using the order of top_n_combined
+
+    # NEXT TIME: change this query to work with the updated DB: exclude movies from the same collection as the provided ID
     query = f'''
         SELECT id, title, release_date, poster, imdb_id FROM movies
         WHERE id IN :movie_ids
         ORDER BY FIELD(id, {','.join(map(str, top_n_combined))})
     ''' 
-    # gonne be honest here, no idea why f strings work here and not just putting it into values
+    # gonna be honest here, no idea why f strings work here and not just putting it into values
     values = {'movie_ids': tuple(top_n_combined)}
     movies = await database.fetch_all(query=query, values=values)
 
