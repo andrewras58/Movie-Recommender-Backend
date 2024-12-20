@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 origins = [
-    os.getenv('FRONTEND_URL')
+    "*"
 ]
 
 app.add_middleware(
@@ -133,14 +133,14 @@ async def resemblance_results(movie_id: int):
     query = f'''
         SELECT id, title, release_date, poster, imdb_id FROM movies
         WHERE id IN :movie_ids AND CASE
-            WHEN series != :series THEN 1
+            WHEN (series != :series OR series = 0) AND id != :movie_id THEN 1
             ELSE 0
         END
         ORDER BY FIELD(id, {','.join(map(str, top_n_combined))})
         LIMIT :display_limit
     ''' 
     # gonna be honest here, no idea why f strings work here and not just putting it into values
-    values = {'movie_ids': tuple(top_n_combined), 'series': series, 'display_limit': display_limit}
+    values = {'movie_ids': tuple(top_n_combined), 'series': series, 'display_limit': display_limit, 'movie_id': movie_id}
     movies = await database.fetch_all(query=query, values=values)
 
     return movies
