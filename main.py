@@ -12,7 +12,8 @@ from scipy.sparse import csr_matrix
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 
-top_n = 10
+top_n = 40
+display_limit = 10
 
 pickle_dir = "pickles"
 
@@ -89,7 +90,7 @@ async def search_by_title(title: str):
 async def resemblance_results(movie_id: int):
     # step 1: get the full movie data we are comparing against
     query = '''
-        SELECT id, overview, genres, keywords, cast, director FROM movies
+        SELECT id, overview, genres, keywords, cast, director, series FROM movies
         WHERE id = :movie_id
     '''
     values = {'movie_id': movie_id}
@@ -100,6 +101,7 @@ async def resemblance_results(movie_id: int):
     overview = movie['overview']
     actors = movie['cast']
     directors = movie['director']
+    series = movie['series']
 
     overview_embedding = models['overview'].encode(overview, convert_to_tensor=True)
     keyword_encoding = models['keyword'].transform([keywords.replace(', ', ' ')]).tocsc().astype(float)
@@ -130,11 +132,15 @@ async def resemblance_results(movie_id: int):
     # NEXT TIME: change this query to work with the updated DB: exclude movies from the same collection as the provided ID
     query = f'''
         SELECT id, title, release_date, poster, imdb_id FROM movies
-        WHERE id IN :movie_ids
+        WHERE id IN :movie_ids AND CASE
+            WHEN series != :series THEN 1
+            ELSE 0
+        END
         ORDER BY FIELD(id, {','.join(map(str, top_n_combined))})
+        LIMIT :display_limit
     ''' 
     # gonna be honest here, no idea why f strings work here and not just putting it into values
-    values = {'movie_ids': tuple(top_n_combined)}
+    values = {'movie_ids': tuple(top_n_combined), 'series': series, 'display_limit': display_limit}
     movies = await database.fetch_all(query=query, values=values)
 
     return movies
