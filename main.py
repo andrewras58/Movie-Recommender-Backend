@@ -11,6 +11,9 @@ import databases
 from scipy.sparse import csr_matrix
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
+from collections import OrderedDict
+
+# this app can be more professional if proper logging was used
 
 top_n = 40
 display_limit = 10
@@ -20,6 +23,15 @@ pickle_dir = "pickles"
 models = {} # genre, overview, keyword
 encodings = {} # genre, overview, keyword, popularity, review
 weights = {}
+
+MOVIE_TITLE_CACHE = OrderedDict({}) # used to store cache from title searches
+RESEMBLANCE_RESULT_CACHE = OrderedDict({}) # used to store cache from resemblance results
+MAX_CACHE_SIZE = 100 # the size of these caches should not exceed 100
+
+def insert_into_cache(cache: OrderedDict, key, value) -> None:
+    if len(cache) >= MAX_CACHE_SIZE:
+        cache.popitem(last=False)
+    cache[key] = value
 
 database_url = os.getenv('DATABASE_URL')
 database = databases.Database(database_url)
@@ -46,6 +58,8 @@ async def lifespan(app: FastAPI):
     models.clear()
     encodings.clear()
     weights.clear()
+    MOVIE_TITLE_CACHE.clear()
+    RESEMBLANCE_RESULT_CACHE.clear()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -76,6 +90,9 @@ We need two endpoints for now:
 
 @app.get('/api/search-by-title')
 async def search_by_title(title: str):
+    if MOVIE_TITLE_CACHE.get(title):
+        print(f'cache hit {title}')
+        return MOVIE_TITLE_CACHE.get(title)
     query = '''
         SELECT id, title, release_date, poster FROM movies
         WHERE title LIKE :title
@@ -84,10 +101,16 @@ async def search_by_title(title: str):
     '''
     values = {'title': f'%{title}%'}
     results = await database.fetch_all(query=query, values=values)
+    insert_into_cache(MOVIE_TITLE_CACHE, title, results)
     return results
 
 @app.get('/api/resemblance-results')
 async def resemblance_results(movie_id: int):
+    # step 0: check the cache
+    if RESEMBLANCE_RESULT_CACHE.get(movie_id):
+        print(f'cache hit {movie_id}')
+        return RESEMBLANCE_RESULT_CACHE.get(movie_id)
+
     # step 1: get the full movie data we are comparing against
     query = '''
         SELECT id, overview, genres, keywords, cast, director, series FROM movies
@@ -142,5 +165,8 @@ async def resemblance_results(movie_id: int):
     # gonna be honest here, no idea why f strings work here and not just putting it into values
     values = {'movie_ids': tuple(top_n_combined), 'series': series, 'display_limit': display_limit, 'movie_id': movie_id}
     movies = await database.fetch_all(query=query, values=values)
+
+    # step 4: insert into the cache
+    insert_into_cache(RESEMBLANCE_RESULT_CACHE, movie_id, movies)
 
     return movies
